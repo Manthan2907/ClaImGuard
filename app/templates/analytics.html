@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Risk Analytics & Loss Exposure | ClaimGuard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; color: #0f172a; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+
+    <!-- Top Navigation Bar -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-8">
+                    <a href="/" class="flex items-center space-x-3">
+                        <div class="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-500/30">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                        </div>
+                        <div>
+                            <span class="text-lg font-bold text-slate-900 tracking-tight">ClaimGuard</span>
+                            <span class="ml-1.5 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">Analytics</span>
+                        </div>
+                    </a>
+
+                    <nav class="hidden md:flex space-x-1">
+                        <a href="/" class="px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors">Claims Register</a>
+                        <a href="/analytics" class="px-3 py-2 rounded-md text-sm font-semibold bg-slate-100 text-blue-700">Risk Analytics</a>
+                        <a href="/cloud-infra" class="px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors">AWS Topology</a>
+                    </nav>
+                </div>
+
+                <div class="flex items-center space-x-3">
+                    <a href="/" class="text-sm font-medium text-blue-600 hover:underline">← Back to Dashboard</a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+
+        <div>
+            <h1 class="text-2xl font-bold text-slate-900">Portfolio Loss Exposure & Risk Metrics</h1>
+            <p class="text-sm text-slate-500 mt-1">Real-time aggregate data aggregated from Amazon RDS MySQL database</p>
+        </div>
+
+        <!-- Metric KPI Cards -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+                <span class="text-xs font-semibold uppercase text-slate-400">Total Incurred Losses</span>
+                <div class="text-3xl font-extrabold text-blue-600 mt-2">${{ "{:,.2f}".format(metrics.total_exposure) }}</div>
+                <p class="text-xs text-slate-500 mt-1">Aggregated across all registered claims</p>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+                <span class="text-xs font-semibold uppercase text-slate-400">Average Claim Value</span>
+                <div class="text-3xl font-extrabold text-slate-900 mt-2">${{ "{:,.2f}".format(metrics.avg_claim) }}</div>
+                <p class="text-xs text-slate-500 mt-1">Per vehicular accident file</p>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+                <span class="text-xs font-semibold uppercase text-slate-400">Approval Clearance Rate</span>
+                {% set approval_rate = (metrics.approved_count / metrics.total_claims * 100) if metrics.total_claims > 0 else 0 %}
+                <div class="text-3xl font-extrabold text-emerald-600 mt-2">{{ "{:.1f}%".format(approval_rate) }}</div>
+                <p class="text-xs text-slate-500 mt-1">{{ metrics.approved_count }} of {{ metrics.total_claims }} files settled</p>
+            </div>
+        </div>
+
+        <!-- Severity & Status Distribution -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+            <!-- Damage Severity Distribution -->
+            <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+                <h2 class="text-base font-bold text-slate-900 mb-4">Damage Severity Classification</h2>
+                <div class="space-y-4">
+                    <div>
+                        <div class="flex justify-between text-xs font-semibold mb-1">
+                            <span class="text-rose-700">Critical Damage (Total Loss / Airbags)</span>
+                            <span class="text-slate-900">{{ metrics.critical_count }} claims</span>
+                        </div>
+                        {% set crit_pct = (metrics.critical_count / metrics.total_claims * 100) if metrics.total_claims > 0 else 0 %}
+                        <div class="w-full bg-slate-100 rounded-full h-3">
+                            <div class="bg-rose-500 h-3 rounded-full" style="width: {{ crit_pct }}%"></div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-xs font-semibold mb-1">
+                            <span class="text-amber-700">Moderate Collision (Panel / Bumpers)</span>
+                            <span class="text-slate-900">{{ metrics.moderate_count }} claims</span>
+                        </div>
+                        {% set mod_pct = (metrics.moderate_count / metrics.total_claims * 100) if metrics.total_claims > 0 else 0 %}
+                        <div class="w-full bg-slate-100 rounded-full h-3">
+                            <div class="bg-amber-500 h-3 rounded-full" style="width: {{ mod_pct }}%"></div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-xs font-semibold mb-1">
+                            <span class="text-slate-700">Minor Scuffs & Dents</span>
+                            <span class="text-slate-900">{{ metrics.minor_count }} claims</span>
+                        </div>
+                        {% set min_pct = (metrics.minor_count / metrics.total_claims * 100) if metrics.total_claims > 0 else 0 %}
+                        <div class="w-full bg-slate-100 rounded-full h-3">
+                            <div class="bg-blue-500 h-3 rounded-full" style="width: {{ min_pct }}%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Operational Claim Status Breakdown -->
+            <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+                <h2 class="text-base font-bold text-slate-900 mb-4">Operational Status Pipeline</h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="p-4 rounded-lg bg-emerald-50 border border-emerald-200">
+                        <span class="text-xs font-semibold text-emerald-800 uppercase">Approved</span>
+                        <div class="text-2xl font-bold text-emerald-700 mt-1">{{ metrics.approved_count }}</div>
+                    </div>
+                    <div class="p-4 rounded-lg bg-amber-50 border border-amber-200">
+                        <span class="text-xs font-semibold text-amber-800 uppercase">Pending Review</span>
+                        <div class="text-2xl font-bold text-amber-700 mt-1">{{ metrics.pending_count }}</div>
+                    </div>
+                    <div class="p-4 rounded-lg bg-rose-50 border border-rose-200">
+                        <span class="text-xs font-semibold text-rose-800 uppercase">Flagged Risk</span>
+                        <div class="text-2xl font-bold text-rose-700 mt-1">{{ metrics.flagged_count }}</div>
+                    </div>
+                    <div class="p-4 rounded-lg bg-slate-100 border border-slate-200">
+                        <span class="text-xs font-semibold text-slate-700 uppercase">Rejected</span>
+                        <div class="text-2xl font-bold text-slate-800 mt-1">{{ metrics.rejected_count }}</div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+</body>
+</html>

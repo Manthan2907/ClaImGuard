@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClaimGuard | Customer Claim Ingestion Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; color: #0f172a; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+
+    <!-- Customer Navigation -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-3">
+                    <div class="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-500/30">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                    </div>
+                    <div>
+                        <span class="text-lg font-bold text-slate-900 tracking-tight">ClaimGuard</span>
+                        <span class="ml-2 text-[10px] font-semibold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Customer Self-Service</span>
+                    </div>
+                </div>
+
+                <div class="flex items-center space-x-4">
+                    <a href="/" class="text-xs font-semibold text-slate-600 hover:text-blue-600 transition-colors flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg border border-slate-200">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                        Adjuster Console &rarr;
+                    </a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="space-y-2">
+            {% for category, message in messages %}
+            <div class="p-4 rounded-xl border text-sm font-medium flex items-center justify-between {% if category == 'success' %}bg-emerald-50 border-emerald-200 text-emerald-800{% elif category == 'error' %}bg-rose-50 border-rose-200 text-rose-800{% else %}bg-blue-50 border-blue-200 text-blue-800{% endif %}">
+                <span>{{ message }}</span>
+                <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-slate-600 font-bold ml-4">&times;</button>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        {% if tracked_claim %}
+        <!-- Tracked Claim Receipt Card (Only shows THIS policyholder's claim) -->
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="bg-gradient-to-r from-blue-600 to-indigo-700 px-6 py-6 text-white">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div>
+                        <span class="text-xs font-semibold uppercase tracking-wider text-blue-200">Claim Ingestion Verified</span>
+                        <h2 class="text-2xl font-bold mt-1 font-mono">{{ tracked_claim.claim_id }}</h2>
+                    </div>
+                    <div class="sm:text-right">
+                        <span class="text-xs text-blue-200 block">Assessment Status</span>
+                        <span class="inline-block mt-1 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider {% if tracked_claim.status == 'APPROVED' %}bg-emerald-400 text-slate-900{% elif tracked_claim.status == 'FLAGGED_HIGH_RISK' %}bg-amber-300 text-slate-900{% elif tracked_claim.status == 'REJECTED' %}bg-rose-400 text-slate-900{% else %}bg-white/20 text-white border border-white/30{% endif %}">
+                            {{ tracked_claim.status }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-6 space-y-6">
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+                    <div>
+                        <span class="text-xs text-slate-400 block font-medium">Claimant</span>
+                        <span class="font-semibold text-slate-900">{{ tracked_claim.claimant_name }}</span>
+                    </div>
+                    <div>
+                        <span class="text-xs text-slate-400 block font-medium">Policy Number</span>
+                        <span class="font-mono font-semibold text-slate-800">{{ tracked_claim.policy_number }}</span>
+                    </div>
+                    <div>
+                        <span class="text-xs text-slate-400 block font-medium">License Plate</span>
+                        <span class="font-mono font-semibold text-slate-800">{{ tracked_claim.vehicle_plate }}</span>
+                    </div>
+                    <div>
+                        <span class="text-xs text-slate-400 block font-medium">Claim Value</span>
+                        <span class="font-semibold text-slate-900 text-base">${{ "{:,.2f}".format(tracked_claim.claim_amount) }}</span>
+                    </div>
+                </div>
+
+                <!-- 5-Step Architecture Stepper -->
+                <div class="pt-4 border-t border-slate-100">
+                    <h3 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Distributed Cloud Processing Pipeline</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-5 gap-3">
+                        <div class="bg-blue-50 border border-blue-200 rounded-xl p-3">
+                            <div class="flex items-center gap-1.5 mb-1 text-blue-700">
+                                <span class="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold">&check;</span>
+                                <span class="text-xs font-bold text-blue-900">1. Ingested</span>
+                            </div>
+                            <p class="text-[11px] text-blue-700">EC2 Docker Container</p>
+                        </div>
+                        <div class="bg-blue-50 border border-blue-200 rounded-xl p-3">
+                            <div class="flex items-center gap-1.5 mb-1 text-blue-700">
+                                <span class="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold">&check;</span>
+                                <span class="text-xs font-bold text-blue-900">2. S3 Storage</span>
+                            </div>
+                            <p class="text-[11px] text-blue-700">AES-256 Encrypted</p>
+                        </div>
+                        <div class="bg-blue-50 border border-blue-200 rounded-xl p-3">
+                            <div class="flex items-center gap-1.5 mb-1 text-blue-700">
+                                <span class="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold">&check;</span>
+                                <span class="text-xs font-bold text-blue-900">3. RDS MySQL</span>
+                            </div>
+                            <p class="text-[11px] text-blue-700">Private DB Subnet</p>
+                        </div>
+                        <div class="bg-blue-50 border border-blue-200 rounded-xl p-3">
+                            <div class="flex items-center gap-1.5 mb-1 text-blue-700">
+                                <span class="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold">&check;</span>
+                                <span class="text-xs font-bold text-blue-900">4. SQS Queue</span>
+                            </div>
+                            <p class="text-[11px] text-blue-700">Decoupled Queue</p>
+                        </div>
+                        <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3">
+                            <div class="flex items-center gap-1.5 mb-1 text-indigo-700">
+                                <span class="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-bold">5</span>
+                                <span class="text-xs font-bold text-indigo-900">5. Adjudication</span>
+                            </div>
+                            <p class="text-[11px] text-indigo-700">Adjuster Decision</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Verified Damage Photo -->
+                <div class="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center gap-5">
+                    <div class="w-32 h-32 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 flex-shrink-0">
+                        <img src="/evidence/{{ tracked_claim.claim_id }}" alt="Evidence Photo" class="w-full h-full object-cover">
+                    </div>
+                    <div class="space-y-1.5 text-sm">
+                        <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Damage Photo Evidence</span>
+                        <p class="text-xs text-slate-600">Stored privately in Amazon S3 with least-privilege IAM policies. No other claimants have access to your data.</p>
+                        <a href="/evidence/{{ tracked_claim.claim_id }}" target="_blank" class="text-xs text-blue-600 hover:underline font-semibold inline-flex items-center gap-1 pt-1">
+                            Open Full Resolution in New Tab &rarr;
+                        </a>
+                    </div>
+                </div>
+
+                <div class="pt-4 border-t border-slate-100 flex justify-between items-center">
+                    <a href="/portal" class="text-xs font-semibold text-blue-600 hover:underline">&larr; Submit Another Claim</a>
+                    <span class="text-xs text-slate-400">Strict Privacy Enforced &bull; Policyholder Sandbox</span>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Customer Claim Submission Form -->
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-8 space-y-6">
+            <div>
+                <h1 class="text-2xl font-bold text-slate-900 tracking-tight">File a Vehicle Damage Claim</h1>
+                <p class="text-sm text-slate-500 mt-1">Submit your vehicle accident evidence directly to the insurance cloud adjudication system.</p>
+            </div>
+
+            <form action="/portal" method="POST" enctype="multipart/form-data" class="space-y-6">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Claimant Full Name *</label>
+                        <input type="text" name="claimantName" required placeholder="e.g. Rahul Sharma" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Insurance Policy Number *</label>
+                        <input type="text" name="policyNumber" required placeholder="e.g. POL-88219" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Vehicle License Plate & Model *</label>
+                        <input type="text" name="vehiclePlate" required placeholder="e.g. MH-02-CB-1337 (Tesla Model 3)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Date of Incident *</label>
+                        <input type="date" name="incidentDate" required id="incidentDateInput" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Estimated Damage Repair Cost ($) *</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400 font-semibold">$</span>
+                            <input type="number" step="0.01" name="claimAmount" required placeholder="4500.00" class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-4 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Impact Severity Assessment *</label>
+                        <select name="damageSeverity" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="MINOR">Minor (Scrapes, mirror, cracked plastic)</option>
+                            <option value="MODERATE" selected>Moderate (Front bumper, fender dent, headlight)</option>
+                            <option value="CRITICAL">Critical (Axle damage, airbag deployed, frame distortion)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Incident Narrative Statement *</label>
+                    <textarea name="description" rows="3" required placeholder="Describe what happened during the incident..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                </div>
+
+                <!-- S3 Photo Upload Box with Live Image Preview -->
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Vehicle Damage Photo Evidence *</label>
+                    <div class="border-2 border-dashed border-slate-300 rounded-2xl p-6 text-center hover:border-blue-500 transition-colors bg-slate-50/50">
+                        <div id="previewContainer" class="hidden mb-4">
+                            <img id="imagePreview" src="" alt="Photo Preview" class="mx-auto max-h-48 rounded-xl shadow-sm border border-slate-200 object-cover">
+                        </div>
+                        <svg class="mx-auto h-10 w-10 text-slate-400 mb-2" stroke="currentColor" fill="none" viewBox="0 0 48 48"><path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                        <div class="flex text-sm text-slate-600 justify-center">
+                            <label for="file-upload" class="relative cursor-pointer bg-white rounded-md font-semibold text-blue-600 hover:text-blue-500 focus-within:outline-none px-2 py-0.5 border border-slate-200 shadow-sm">
+                                <span>Choose damage photo</span>
+                                <input id="file-upload" name="damagePhoto" type="file" accept="image/*" required class="sr-only" onchange="previewPhoto(event)">
+                            </label>
+                            <p class="pl-2">or drag and drop</p>
+                        </div>
+                        <p class="text-xs text-slate-400 mt-1">Uploaded securely to Amazon S3 (Bucket: <code>claimguard-evidence-472353357588</code>)</p>
+                    </div>
+                </div>
+
+                <!-- Submit Button -->
+                <div class="pt-2">
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 px-6 rounded-xl shadow-md shadow-blue-500/20 hover:shadow-lg transition-all flex items-center justify-center gap-2 text-base">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        Submit Claim for Automated Adjudication
+                    </button>
+                    <p class="text-center text-xs text-slate-400 mt-2">Policyholder mode: You will only see your own claim confirmation receipt upon submission.</p>
+                </div>
+            </form>
+        </div>
+
+    </main>
+
+    <footer class="border-t border-slate-200 bg-white py-6 mt-12 text-center text-xs text-slate-400">
+        ClaimGuard &bull; Cloud Computing Mini Project &bull; Region: us-east-1 &bull; Account: 472353357588
+    </footer>
+
+    <script>
+        document.getElementById('incidentDateInput').value = new Date().toISOString().split('T')[0];
+        function previewPhoto(event) {
+            const input = event.target;
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const img = document.getElementById('imagePreview');
+                    img.src = e.target.result;
+                    document.getElementById('previewContainer').classList.remove('hidden');
+                }
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+    </script>
+</body>
+</html>

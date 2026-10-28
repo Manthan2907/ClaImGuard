@@ -1,0 +1,526 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ClaimGuard - Enterprise Cloud-Native Vehicle Insurance Claim System'
+
+Parameters:
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64'
+  DBMasterUser:
+    Type: String
+    Default: claimadmin
+    Description: Master username for RDS MySQL database
+  DBMasterPassword:
+    Type: String
+    NoEcho: true
+    Description: Master password for RDS MySQL database
+  AlertEmail:
+    Type: String
+    Description: Email address for high-value claim SNS alerts
+
+Resources:
+  # ==========================================
+  # 1. NETWORKING: CUSTOM VPC & SUBNETS
+  # ==========================================
+  ClaimGuardVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: ClaimGuard-VPC
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: ClaimGuard-IGW
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref ClaimGuardVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ClaimGuardVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: ClaimGuard-Public-Subnet-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ClaimGuardVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: ClaimGuard-Public-Subnet-2
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ClaimGuardVPC
+      CidrBlock: 10.0.10.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: ClaimGuard-Private-Subnet-1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ClaimGuardVPC
+      CidrBlock: 10.0.20.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: ClaimGuard-Private-Subnet-2
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ClaimGuardVPC
+      Tags:
+        - Key: Name
+          Value: ClaimGuard-Public-RouteTable
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # ==========================================
+  # 2. SECURITY GROUPS (TIER ISOLATION)
+  # ==========================================
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ClaimGuard EC2 Web Server
+      VpcId: !Ref ClaimGuardVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTP web traffic
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          CidrIp: 0.0.0.0/0
+          Description: Allow Flask application port
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: Allow SSH administration
+      Tags:
+        - Key: Name
+          Value: ClaimGuard-Web-SG
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ClaimGuard RDS MySQL - Private access only
+      VpcId: !Ref ClaimGuardVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref WebServerSecurityGroup
+          Description: Inbound MySQL ONLY from EC2 Web Security Group
+      Tags:
+        - Key: Name
+          Value: ClaimGuard-RDS-SG
+
+  # ==========================================
+  # 3. STORAGE: S3 BUCKET FOR CLAIM EVIDENCE
+  # ==========================================
+  EvidenceS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'claimguard-evidence-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST]
+            AllowedOrigins: ['*']
+      Tags:
+        - Key: Project
+          Value: ClaimGuard
+
+  # ==========================================
+  # 4. NOTIFICATION: SNS TOPIC (HIGH VALUE ALERTS)
+  # ==========================================
+  ClaimAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: ClaimGuard-HighValueAlerts
+      DisplayName: ClaimGuard Alerts
+      Subscription:
+        - Endpoint: !Ref AlertEmail
+          Protocol: email
+
+  # ==========================================
+  # 5. ASYNCHRONOUS SQS & DEAD-LETTER QUEUE
+  # ==========================================
+  ClaimProcessingDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: ClaimGuard-DLQ
+      MessageRetentionPeriod: 1209600
+
+  ClaimProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: ClaimGuard-ProcessingQueue
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt ClaimProcessingDLQ.Arn
+        maxReceiveCount: 3
+
+  # ==========================================
+  # 6. DATABASE: MANAGED RDS MYSQL (FREE TIER)
+  # ==========================================
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnets for ClaimGuard RDS
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: ClaimGuard-DB-Subnet-Group
+
+  ClaimGuardDB:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    Properties:
+      DBInstanceIdentifier: claimguard-db
+      AllocatedStorage: '20'
+      DBInstanceClass: db.t3.micro
+      Engine: mysql
+      EngineVersion: '8.0'
+      MasterUsername: !Ref DBMasterUser
+      MasterUserPassword: !Ref DBMasterPassword
+      DBName: claimguard_db
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      PubliclyAccessible: false
+      MultiAZ: false
+      StorageType: gp2
+      BackupRetentionPeriod: 0
+      Tags:
+        - Key: Name
+          Value: ClaimGuard-RDS-MySQL
+
+  # ==========================================
+  # 7. CONFIGURATION: SSM PARAMETER STORE
+  # ==========================================
+  ParamDBHost:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /claimguard/db/host
+      Type: String
+      Value: !GetAtt ClaimGuardDB.Endpoint.Address
+      Description: RDS MySQL Endpoint Hostname
+
+  ParamDBUser:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /claimguard/db/user
+      Type: String
+      Value: !Ref DBMasterUser
+      Description: RDS MySQL Master Username
+
+  ParamDBPassword:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /claimguard/db/password
+      Type: String
+      Value: !Ref DBMasterPassword
+      Description: RDS MySQL Master Password
+
+  ParamDBName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /claimguard/db/name
+      Type: String
+      Value: claimguard_db
+      Description: RDS Database Name
+
+  ParamS3Bucket:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /claimguard/s3/bucket
+      Type: String
+      Value: !Ref EvidenceS3Bucket
+      Description: S3 Bucket Name for Evidence Storage
+
+  ParamSNSTopic:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /claimguard/sns/topic_arn
+      Type: String
+      Value: !Ref ClaimAlertsTopic
+      Description: SNS Topic ARN for Alerts
+
+  ParamSQSQueue:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /claimguard/sqs/queue_url
+      Type: String
+      Value: !Ref ClaimProcessingQueue
+      Description: SQS Queue URL for Claim Ingestion
+
+  ParamGeminiKey:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /claimguard/ai/gemini_api_key
+      Type: String
+      Value: "NOT_CONFIGURED"
+      Description: Optional Google Gemini API Key for AI Damage Assessment
+
+  # ==========================================
+  # 8. SECURITY: IAM ROLE FOR EC2 INSTANCE
+  # ==========================================
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ClaimGuard-EC2-Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ec2.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AmazonSQSFullAccess
+        - arn:aws:iam::aws:policy/AmazonSNSFullAccess
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: ClaimGuard-EC2-InstanceProfile
+      Roles:
+        - !Ref EC2InstanceRole
+
+  # ==========================================
+  # 9. SERVERLESS AWS LAMBDA RISK ANALYZER
+  # ==========================================
+  AnalyzerLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ClaimGuard-AnalyzerLambda-Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [lambda.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole
+        - arn:aws:iam::aws:policy/AmazonSNSFullAccess
+        - arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
+
+  AnalyzerLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ClaimGuard-DamageAnalyzerFunction
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt AnalyzerLambdaRole.Arn
+      Timeout: 30
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref ClaimAlertsTopic
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+
+          sns = boto3.client('sns')
+          SNS_TOPIC_ARN = os.environ.get('SNS_TOPIC_ARN')
+
+          def lambda_handler(event, context):
+              records = event.get('Records', [])
+              print(f"[ClaimGuard-Lambda] Processing {len(records)} SQS Message(s)...")
+              for record in records:
+                  body = json.loads(record.get('body', '{}'))
+                  claim_id = body.get('claim_id')
+                  amount = float(body.get('claim_amount', 0))
+                  severity = body.get('damage_severity')
+                  policy_no = body.get('policy_number')
+                  
+                  print(f"Analyzing Claim {claim_id}: Policy={policy_no}, Amount=${amount}, Severity={severity}")
+                  if amount >= 2000 or severity == 'CRITICAL':
+                      print(f"[HIGH RISK] Dispatching SNS alert for claim {claim_id}...")
+                      if SNS_TOPIC_ARN:
+                          sns.publish(
+                              TopicArn=SNS_TOPIC_ARN,
+                              Subject=f"[ClaimGuard Alert] High-Value Claim: {claim_id}",
+                              Message=f"Claim {claim_id} for policy {policy_no} flagged with amount ${amount:,.2f}"
+                          )
+              return {'statusCode': 200, 'body': 'OK'}
+
+  LambdaSQSTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 1
+      EventSourceArn: !GetAtt ClaimProcessingQueue.Arn
+      FunctionName: !GetAtt AnalyzerLambdaFunction.Arn
+      Enabled: true
+
+  # ==========================================
+  # 10. CLOUDWATCH ALARM
+  # ==========================================
+  HighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: ClaimGuard-EC2-HighCPU-Alarm
+      AlarmDescription: Alarm if ClaimGuard Web Server CPU exceeds 75%
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 75.0
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref WebServerInstance
+
+  # ==========================================
+  # 11. COST MANAGEMENT: AWS BUDGET ALERT
+  # ==========================================
+  ClaimGuardBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: ClaimGuard-Monthly-FreeTier-Budget
+        BudgetLimit:
+          Amount: 1.0
+          Unit: USD
+        TimeUnit: MONTHLY
+        BudgetType: COST
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmail
+
+  # ==========================================
+  # 12. COMPUTE: EC2 WEB SERVER
+  # ==========================================
+  WebServerInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: [ClaimGuardDB, ParamDBHost]
+    Properties:
+      InstanceType: t3.micro
+      ImageId: !Ref LatestAmiId
+      SubnetId: !Ref PublicSubnet1
+      SecurityGroupIds:
+        - !Ref WebServerSecurityGroup
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          dnf update -y
+          dnf install -y docker git
+          systemctl start docker
+          systemctl enable docker
+          usermod -aG docker ec2-user
+
+          mkdir -p /app
+          cd /app
+
+          # Poll for application deployment package in S3
+          BUCKET="claimguard-evidence-${AWS::AccountId}"
+          for i in {1..60}; do
+            if aws s3 cp s3://$BUCKET/deploy/app.tar.gz /app/app.tar.gz; then
+              tar -xzf /app/app.tar.gz -C /app/
+              docker build -t claimguard:1.0 /app/
+              docker run -d -p 80:5000 --restart always --name claimguard-app claimguard:1.0
+              break
+            fi
+            sleep 10
+          done
+      Tags:
+        - Key: Name
+          Value: ClaimGuard-Web-Server
+
+Outputs:
+  VPCId:
+    Description: Custom VPC ID
+    Value: !Ref ClaimGuardVPC
+  WebPublicIP:
+    Description: Public IP of ClaimGuard Web Server
+    Value: !GetAtt WebServerInstance.PublicIp
+  WebURL:
+    Description: Application Access URL
+    Value: !Sub 'http://${WebServerInstance.PublicIp}'
+  RDSEndpoint:
+    Description: Private RDS MySQL Endpoint
+    Value: !GetAtt ClaimGuardDB.Endpoint.Address
+  S3BucketName:
+    Description: Claim Evidence S3 Bucket
+    Value: !Ref EvidenceS3Bucket
+  SNSTopicARN:
+    Description: Claim Alerts SNS Topic
+    Value: !Ref ClaimAlertsTopic
+  SQSQueueURL:
+    Description: Ingestion SQS Queue URL
+    Value: !Ref ClaimProcessingQueue
+  SQSDLQURL:
+    Description: Dead-Letter Queue URL
+    Value: !Ref ClaimProcessingDLQ
+  LambdaFunctionARN:
+    Description: Serverless Claim Analyzer Lambda
+    Value: !GetAtt AnalyzerLambdaFunction.Arn
